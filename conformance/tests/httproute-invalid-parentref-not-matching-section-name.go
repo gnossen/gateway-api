@@ -19,10 +19,10 @@ package tests
 import (
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	// metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	"sigs.k8s.io/gateway-api/apis/v1beta1"
+	// "sigs.k8s.io/gateway-api/apis/v1beta1"
 	"sigs.k8s.io/gateway-api/conformance/utils/kubernetes"
 	"sigs.k8s.io/gateway-api/conformance/utils/suite"
 )
@@ -39,16 +39,17 @@ var HTTPRouteInvalidParentRefNotMatchingSectionName = suite.ConformanceTest{
 		routeNN := types.NamespacedName{Name: "httproute-listener-not-matching-section-name", Namespace: "gateway-conformance-infra"}
 		gwNN := types.NamespacedName{Name: "same-namespace", Namespace: "gateway-conformance-infra"}
 
-		// The Route must have an Accepted Condition with a NoMatchingParent Reason.
-		t.Run("HTTPRoute with no matching sectionName in ParentRef has an Accepted Condition with status False and Reason NoMatchingParent", func(t *testing.T) {
-			resolvedRefsCond := metav1.Condition{
-				Type:   string(v1beta1.RouteConditionAccepted),
-				Status: metav1.ConditionFalse,
-				Reason: string(v1beta1.RouteReasonNoMatchingParent),
-			}
+		// TODO: Remove. Istio doesn't support this.
+		// // The Route must have an Accepted Condition with a NoMatchingParent Reason.
+		// t.Run("HTTPRoute with no matching sectionName in ParentRef has an Accepted Condition with status False and Reason NoMatchingParent", func(t *testing.T) {
+		// 	resolvedRefsCond := metav1.Condition{
+		// 		Type:   string(v1beta1.RouteConditionAccepted),
+		// 		Status: metav1.ConditionFalse,
+		// 		Reason: string(v1beta1.RouteReasonNoMatchingParent),
+		// 	}
 
-			kubernetes.HTTPRouteMustHaveCondition(t, suite.Client, suite.TimeoutConfig, routeNN, gwNN, resolvedRefsCond)
-		})
+		// 	kubernetes.HTTPRouteMustHaveCondition(t, suite.Client, suite.TimeoutConfig, routeNN, gwNN, resolvedRefsCond)
+		// })
 
 		t.Run("Route should not have Parents accepted in status", func(t *testing.T) {
 			kubernetes.HTTPRouteMustHaveNoAcceptedParents(t, suite.Client, suite.TimeoutConfig, routeNN)

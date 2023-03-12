@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: istio-conformance-account
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+# This cluster role binding allows anyone in the "manager" group to read secrets in any namespace.
+kind: ClusterRoleBinding
+metadata:
+  name: istio-conformance-global
+subjects:
+- kind: ServiceAccount
+  name: istio-conformance-account
+  namespace: default
+  # apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: istio-conformance
+  namespace: default
+spec:
+  template:
+    spec:
+      serviceAccountName: istio-conformance-account
+      containers:
+      - name: conformance
+        image: IMAGEGOESHERE
+      restartPolicy: Never
+  backoffLimit: 1

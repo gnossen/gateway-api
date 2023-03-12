@@ -1,0 +1,6 @@
+FROM golang:1.19
+
+WORKDIR /
+
+COPY conformance.test /
+CMD  ["/conformance.test", "-test.v", "--gateway-class", "istio",  "--debug"]

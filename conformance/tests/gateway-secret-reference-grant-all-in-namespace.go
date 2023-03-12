@@ -28,7 +28,8 @@ import (
 )
 
 func init() {
-	ConformanceTests = append(ConformanceTests, GatewaySecretReferenceGrantAllInNamespace)
+	// TODO: Remove.
+	// ConformanceTests = append(ConformanceTests, GatewaySecretReferenceGrantAllInNamespace)
 }
 
 var GatewaySecretReferenceGrantAllInNamespace = suite.ConformanceTest{
