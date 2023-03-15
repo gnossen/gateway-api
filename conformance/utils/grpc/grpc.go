@@ -1,0 +1,250 @@
+/*
+Copyright 2023 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package grpc
+
+import (
+	"context"
+	"time"
+	"fmt"
+	"strings"
+	"testing"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/credentials/insecure"
+	"github.com/stretchr/testify/require"
+
+	pb "sigs.k8s.io/gateway-api/conformance/proto/grpcechoserver"
+	"sigs.k8s.io/gateway-api/conformance/utils/http"
+	"sigs.k8s.io/gateway-api/conformance/utils/config"
+)
+
+const echoServerPackage = "ingress_controller_conformance.images.grpcechoserver.grpcecho"
+const echoServerService = "GrpcEcho"
+
+type Response struct {
+  Code 		codes.Code  
+  Headers	*metadata.MD
+  Trailers	*metadata.MD
+  Response 	*pb.EchoResponse
+}
+
+// ExpectedResponse defines the response expected for a given request.
+type ExpectedResponse struct {
+	// Defines the request to make. Only one of EchoRequest and EchoTwoRequest
+	// may be set.
+	EchoRequest *pb.EchoRequest
+	EchoTwoRequest *pb.EchoRequest
+	EchoThreeRequest *pb.EchoRequest
+
+	// TODO: Implement.
+	// // ExpectedRequest defines the request that
+	// // is expected to arrive at the backend. If
+	// // not specified, the backend request will be
+	// // expected to match Request.
+	// ExpectedRequest *ExpectedRequest
+
+	// TODO: Implement
+	// RedirectRequest *roundtripper.RedirectRequest
+
+	// TODO: Implement.
+	// // BackendSetResponseHeaders is a set of headers
+	// // the echoserver should set in its response.
+	// BackendSetResponseHeaders map[string]string
+
+	// Response defines what response the test case
+	// should receive.
+	Response Response
+
+	Host      string
+	Backend   string
+	Namespace string
+	Headers	  *metadata.MD
+
+	// User Given TestCase name
+	TestCaseName string
+}
+
+func getMethodName(expected *ExpectedResponse) string {
+	if expected.EchoRequest != nil {
+		return "Echo"
+	} else if expected.EchoTwoRequest != nil {
+		return "EchoTwo"
+
+	} else {
+		return "EchoThree"
+	}
+}
+
+func getFullyQualifiedMethod(expected *ExpectedResponse) string {
+	return fmt.Sprintf("/%s.%s/%s", echoServerPackage, echoServerService, getMethodName(expected))
+}
+
+func (er *ExpectedResponse) GetTestCaseName(_ int) string {
+	if er.TestCaseName != "" {
+		return er.TestCaseName
+	}
+
+	headerStr := ""
+	reqStr := ""
+	
+	if er.Headers != nil {
+		headerStr = " with headers"
+	}
+
+	reqStr = fmt.Sprintf("%d request to '%s%s'%s", er.Host, getFullyQualifiedMethod(er), headerStr)
+
+	if er.Backend != "" {
+		return fmt.Sprintf("%s should go to %s", reqStr, er.Backend)
+	}
+	return fmt.Sprintf("%s should receive a %s (%d)", reqStr, er.Response.Code.String(), er.Response.Code)
+}
+
+type client struct {
+	Conn *grpc.ClientConn
+}
+
+func (c *client) ensureConnection(address string) error {
+	if c.Conn != nil {
+		return nil
+	}
+	var err error
+	// TODO: Implement TLS support.
+	c.Conn, err = grpc.Dial(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		c.Conn = nil
+		return err
+	}
+	return nil
+}
+
+func (c *client) resetConnection() {
+	if c.Conn == nil {
+		return
+	}
+	c.Conn.Close()
+	c.Conn = nil
+}
+
+func (c *client) SendRPC(address string, expected ExpectedResponse, timeout time.Duration) (*Response, error) {
+	if err := c.ensureConnection(address); err != nil {
+		return &Response{}, err
+	}
+
+	// TODO: Apply headers in general.
+	// TODO: Set Host header.
+	resp := &Response{
+		Headers: &metadata.MD{},
+		Trailers: &metadata.MD{},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	stub := pb.NewGrpcEchoClient(c.Conn)
+	var err error
+	if expected.EchoRequest != nil {
+		resp.Response, err = stub.Echo(ctx, expected.EchoRequest, grpc.Header(resp.Headers), grpc.Trailer(resp.Trailers))
+	} else if expected.EchoTwoRequest != nil {
+		resp.Response, err = stub.EchoTwo(ctx, expected.EchoRequest, grpc.Header(resp.Headers), grpc.Trailer(resp.Trailers))
+
+	} else if expected.EchoThreeRequest != nil {
+		resp.Response, err = stub.EchoThree(ctx, expected.EchoRequest, grpc.Header(resp.Headers), grpc.Trailer(resp.Trailers))
+
+	} else {
+		return resp, fmt.Errorf("No request specified.")
+	}
+
+	if err != nil {
+		resp.Code = status.Code(err)
+		if resp.Code == codes.Internal {
+			c.resetConnection()
+		}
+	} else {
+		resp.Code = codes.OK
+	}
+
+	return resp, nil
+}
+
+func (c *client) Close() {
+	if c.Conn != nil {
+		c.Conn.Close()
+	}
+}
+
+func compareResponse(expected *ExpectedResponse, response *Response) error {
+	if expected.Response.Code != response.Code {
+		return fmt.Errorf("expected status code to be %s (%d), but got %s (%d)", expected.Response.Code.String(), expected.Response.Code, response.Code.String(), response.Code)
+	}
+	if response.Code == codes.OK {
+		expectedFullyQualifiedMethod := getFullyQualifiedMethod(expected)
+		if expectedFullyQualifiedMethod  != response.Response.Assertions.FullyQualifiedMethod {
+			return fmt.Errorf("expected path to be %s, got %s ", expectedFullyQualifiedMethod, response.Response.Assertions.FullyQualifiedMethod)
+		}
+
+		if expected.Namespace != "" && expected.Namespace != response.Response.Assertions.Context.Namespace {
+			return fmt.Errorf("expected namespace to be %s, got %s", expected.Namespace, response.Response.Assertions.Context.Namespace)
+		}
+
+		// TODO: Implement header checking.
+
+		if !strings.HasPrefix(response.Response.Assertions.Context.Pod, expected.Backend) {
+			return fmt.Errorf("expected pod name to start with %s, got %s", expected.Backend, response.Response.Assertions.Context.Pod)
+		}
+	}
+	return nil
+}
+
+func validateExpectedResponse(t *testing.T, expected ExpectedResponse) {
+	requestTypeCount := 0
+	if expected.EchoRequest != nil {
+		requestTypeCount++
+	}
+	if expected.EchoTwoRequest != nil {
+		requestTypeCount++
+	}
+	if expected.EchoThreeRequest != nil {
+		requestTypeCount++
+	}
+	require.Equal(t, 1, requestTypeCount, "expected only one request type to be set, but found %d: %v", requestTypeCount, expected)
+}
+
+func MakeRequestAndExpectEventuallyConsistentResponse(t *testing.T, timeoutConfig config.TimeoutConfig, gwAddr string, expected ExpectedResponse) {
+	t.Helper()
+	validateExpectedResponse(t, expected)
+	c := &client{
+		Conn: nil,
+	}
+	defer c.Close()
+	sendRPC := func(elapsed time.Duration) bool {
+		resp, err := c.SendRPC(gwAddr, expected, timeoutConfig.MaxTimeToConsistency - elapsed)
+		if err != nil {
+			t.Logf("Failed to send RPC, not ready yet: %v (after %v)", err, elapsed)	
+			return false
+		}
+		if err := compareResponse(&expected, resp); err != nil {
+			// TODO: Pick out and log the particular request better.
+			t.Logf("Response expectation failed for request: %v  not ready yet: %v (after %v)", expected, err, elapsed)
+			return false
+		}
+		return true
+	}
+	http.AwaitConvergence(t, timeoutConfig.RequiredConsecutiveSuccesses, timeoutConfig.MaxTimeToConsistency, sendRPC)
+	t.Logf("Request passed")
+}
