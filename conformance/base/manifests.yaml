@@ -446,8 +446,8 @@ spec:
     spec:
       containers:
       - name: grpc-infra-backend-v1
-        # TODO: Upload official version.
-        image: gcr.io/rbellevi-gke-dev/grpcechoserver:2
+        # Source: https://github.com/kubernetes-sigs/ingress-controller-conformance/pull/106
+        image: us-docker.pkg.dev/grpc-testing/testing-images-public/gateway-api/grpcechoserver:alpha2
         env:
         - name: POD_NAME
           valueFrom:
@@ -493,8 +493,8 @@ spec:
     spec:
       containers:
       - name: grpc-infra-backend-v2
-        # TODO: Upload official version.
-        image: gcr.io/rbellevi-gke-dev/grpcechoserver:2
+        # Source: https://github.com/kubernetes-sigs/ingress-controller-conformance/pull/106
+        image: us-docker.pkg.dev/grpc-testing/testing-images-public/gateway-api/grpcechoserver:alpha2
         env:
         - name: POD_NAME
           valueFrom:
