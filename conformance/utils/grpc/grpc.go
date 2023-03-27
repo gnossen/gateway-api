@@ -96,7 +96,7 @@ func getFullyQualifiedMethod(expected *ExpectedResponse) string {
 	return fmt.Sprintf("/%s.%s/%s", echoServerPackage, echoServerService, getMethodName(expected))
 }
 
-func (er *ExpectedResponse) GetTestCaseName(_ int) string {
+func (er *ExpectedResponse) GetTestCaseName(i int) string {
 	if er.TestCaseName != "" {
 		return er.TestCaseName
 	}
@@ -108,7 +108,7 @@ func (er *ExpectedResponse) GetTestCaseName(_ int) string {
 		headerStr = " with headers"
 	}
 
-	reqStr = fmt.Sprintf("%d request to '%s%s'%s", er.Host, getFullyQualifiedMethod(er), headerStr)
+	reqStr = fmt.Sprintf("%d request to '%s%s'%s", i, er.Host, getFullyQualifiedMethod(er), headerStr)
 
 	if er.Backend != "" {
 		return fmt.Sprintf("%s should go to %s", reqStr, er.Backend)
@@ -142,7 +142,8 @@ func (c *client) resetConnection() {
 	c.Conn = nil
 }
 
-func (c *client) SendRPC(address string, expected ExpectedResponse, timeout time.Duration) (*Response, error) {
+func (c *client) SendRPC(t *testing.T, address string, expected ExpectedResponse, timeout time.Duration) (*Response, error) {
+	t.Helper()
 	if err := c.ensureConnection(address); err != nil {
 		return &Response{}, err
 	}
@@ -158,13 +159,14 @@ func (c *client) SendRPC(address string, expected ExpectedResponse, timeout time
 
 	stub := pb.NewGrpcEchoClient(c.Conn)
 	var err error
+	t.Logf("Sending RPC")
 	if expected.EchoRequest != nil {
 		resp.Response, err = stub.Echo(ctx, expected.EchoRequest, grpc.Header(resp.Headers), grpc.Trailer(resp.Trailers))
 	} else if expected.EchoTwoRequest != nil {
-		resp.Response, err = stub.EchoTwo(ctx, expected.EchoRequest, grpc.Header(resp.Headers), grpc.Trailer(resp.Trailers))
+		resp.Response, err = stub.EchoTwo(ctx, expected.EchoTwoRequest, grpc.Header(resp.Headers), grpc.Trailer(resp.Trailers))
 
 	} else if expected.EchoThreeRequest != nil {
-		resp.Response, err = stub.EchoThree(ctx, expected.EchoRequest, grpc.Header(resp.Headers), grpc.Trailer(resp.Trailers))
+		resp.Response, err = stub.EchoThree(ctx, expected.EchoThreeRequest, grpc.Header(resp.Headers), grpc.Trailer(resp.Trailers))
 
 	} else {
 		return resp, fmt.Errorf("No request specified.")
@@ -172,10 +174,13 @@ func (c *client) SendRPC(address string, expected ExpectedResponse, timeout time
 
 	if err != nil {
 		resp.Code = status.Code(err)
+		t.Logf("RPC finished with error: %v", err)
 		if resp.Code == codes.Internal {
+			t.Logf("Received code Internal. Resetting connection.")
 			c.resetConnection()
 		}
 	} else {
+		t.Logf("RPC finished with response %v", resp.Response)
 		resp.Code = codes.OK
 	}
 
@@ -233,7 +238,7 @@ func MakeRequestAndExpectEventuallyConsistentResponse(t *testing.T, timeoutConfi
 	}
 	defer c.Close()
 	sendRPC := func(elapsed time.Duration) bool {
-		resp, err := c.SendRPC(gwAddr, expected, timeoutConfig.MaxTimeToConsistency - elapsed)
+		resp, err := c.SendRPC(t, gwAddr, expected, timeoutConfig.MaxTimeToConsistency - elapsed)
 		if err != nil {
 			t.Logf("Failed to send RPC, not ready yet: %v (after %v)", err, elapsed)	
 			return false
