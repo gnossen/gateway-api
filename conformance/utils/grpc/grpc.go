@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"sort"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -48,6 +49,9 @@ type Response struct {
 type RequestMetadata struct {
   // The :authority pseudoheader to set on the outgoing request.
   Authority	string
+
+  // Outgoing metadata pairs to add to the request.
+  Metadata	map[string]string
 }
 
 // ExpectedResponse defines the response expected for a given request.
@@ -80,10 +84,8 @@ type ExpectedResponse struct {
 	// should receive.
 	Response Response
 
-	Host      string
 	Backend   string
 	Namespace string
-	Headers	  *metadata.MD
 
 	// User Given TestCase name
 	TestCaseName string
@@ -104,6 +106,23 @@ func getFullyQualifiedMethod(expected *ExpectedResponse) string {
 	return fmt.Sprintf("/%s.%s/%s", echoServerPackage, echoServerService, getMethodName(expected))
 }
 
+func getMapDeterministicStr(m map[string]string) string {
+	keys := []string{}		
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := "{"
+	for i, key := range keys {
+		out += key + ":" + m[key]
+		if i != len(keys) - 1 {
+			out += ","
+		}
+	}
+	out += "}"
+	return out
+}
+
 func (er *ExpectedResponse) GetTestCaseName(i int) string {
 	if er.TestCaseName != "" {
 		return er.TestCaseName
@@ -112,11 +131,18 @@ func (er *ExpectedResponse) GetTestCaseName(i int) string {
 	headerStr := ""
 	reqStr := ""
 	
-	if er.Headers != nil {
-		headerStr = " with headers"
+
+	authority := ""
+	if er.RequestMetadata != nil {
+		rm := er.RequestMetadata
+		authority = rm.Authority
+		if len(rm.Metadata) >0 {
+			// TODO: Sort by key then value to make deterministic.
+			headerStr = fmt.Sprintf(" with headers '%s'", getMapDeterministicStr(rm.Metadata))
+		}
 	}
 
-	reqStr = fmt.Sprintf("%d request to '%s%s'%s", i, er.Host, getFullyQualifiedMethod(er), headerStr)
+	reqStr = fmt.Sprintf("%d request to '%s%s'%s", i, authority, getFullyQualifiedMethod(er), headerStr)
 
 	if er.Backend != "" {
 		return fmt.Sprintf("%s should go to %s", reqStr, er.Backend)
@@ -162,13 +188,16 @@ func (c *client) SendRPC(t *testing.T, address string, expected ExpectedResponse
 		return &Response{}, err
 	}
 
-	// TODO: Apply headers in general.
-	// TODO: Set Host header.
 	resp := &Response{
 		Headers: &metadata.MD{},
 		Trailers: &metadata.MD{},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+
+	if c.RequestMetadata != nil && len(c.RequestMetadata.Metadata) > 0 {
+		ctx = metadata.NewOutgoingContext(ctx, metadata.New(c.RequestMetadata.Metadata))
+	}
+
 	defer cancel()
 
 	stub := pb.NewGrpcEchoClient(c.Conn)
