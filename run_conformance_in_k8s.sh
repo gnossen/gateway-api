@@ -5,7 +5,7 @@ set -euxo pipefail
 GCP_PROJECT=rbellevi-gke-dev
 BASE_TAG=gcr.io/${GCP_PROJECT}/gateway-conformance
 
-go test -c conformance/conformance_test.go
+CGO_ENABLED=0 go test -c conformance/conformance_test.go
 
 HASH=$(shasum conformance.test | awk '{print $1;}')
 TAG="${BASE_TAG}:${HASH}"
